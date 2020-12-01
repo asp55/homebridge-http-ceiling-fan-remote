@@ -11,6 +11,8 @@ import {
   Service
 } from "homebridge";
 
+import got, {Response} from "got";
+
 /*
  * IMPORTANT NOTICE
  *
@@ -39,31 +41,80 @@ let hap: HAP;
  */
 export = (api: API) => {
   hap = api.hap;
-
-  api.registerAccessory("ExampleSwitch", ExampleSwitch);
+  api.registerAccessory("CEILING-FAN-REMOTE", CeilingFanRemote);
 };
 
-class ExampleSwitch implements AccessoryPlugin {
+class CeilingFanRemote implements AccessoryPlugin {
 
+  static COMMANDS = {
+    FAN: {
+      OFF: 98,
+      TOGGLE: 35,
+      SPEED1: 4,
+      SPEED2: 32,
+      SPEED3: 64,
+      SPEED_DECREASE: 514,
+      SPEED_INCREASE: 513,
+      SPEED_MIN: 2,
+      SPEED_MAX: 66
+    },
+    LIGHT: {
+      ON: 138,
+      OFF: 266,
+      TOGGLE: 768,
+      BRIGHTNESS1: 10,
+      BRIGHTNESS2: 11,
+      BRIGHTNESS3: 12,
+      BRIGHTNESS4: 13,
+      BRIGHTNESS5: 14,
+      BRIGHTNESS6: 15,
+      BRIGHTNESS7: 72,
+      BRIGHTNESS8: 73,
+      BRIGHTNESS_DECREASE: 265,
+      BRIGHTNESS_INCREASE: 137,
+      BRIGTHNESS_MIN: 9,
+      BRIGHTNESS_MAX: 74
+    },
+    RECEIVER: {
+      TOGGLE_DIMMING: 5,
+      PAIR_REMOTE: 65,
+    }    
+  };
 
   private readonly log: Logging;
   private readonly name: string;
+  private readonly verbose: boolean;
+  private readonly rfbridge: string;
+  private readonly remote: string;
+
 
   private readonly fanService: Service;
   private fanOn = false;
   private readonly fanStep = 33.33;
-  private fanSpeed = this.fanStep;
+  private fanSpeed = 1;
   private readonly lightService: Service;
   private lightOn = false;
-  private lightBrightness = 0;
+  private lightBrightness = 8;
   //private readonly targetControlManagementService: Service;
   private readonly informationService: Service;
+
 
 
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
     this.name = config.name;
+    this.verbose = config.verbose as boolean || false;
+
+    if(!config.rfbridge) {
+      this.log.warn(`rfbridge is a required config parameter. Running in test mode.`);
+    }
+    this.rfbridge = config.rfbridge || "test";
+
+    if(!config.remote) {
+      this.log.warn(`remote is a required config parameter. Running in test mode.`);
+    }
+    this.remote = config.remote || "test";
 
     /*
     *   Service: Fan 
@@ -76,12 +127,22 @@ class ExampleSwitch implements AccessoryPlugin {
     */
     this.fanService.getCharacteristic(hap.Characteristic.Active)
     .on(CharacteristicEventTypes.GET, (callback: CharacteristicGetCallback) => {
-      log.info("Get Active");
+      log.info(`GET fan active (Current Value: ${this.fanOn})`);
       callback(undefined, this.fanOn);
     })
     .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
       this.fanOn = value as boolean;
-      log.info(`Fan was set to ${this.fanOn? "ON": "OFF"}`);
+      log.info(`SET fan active to ${this.fanOn? "ON": "OFF"}`);
+
+      const commands = [
+        CeilingFanRemote.COMMANDS.FAN.OFF,
+        CeilingFanRemote.COMMANDS.FAN.SPEED1,
+        CeilingFanRemote.COMMANDS.FAN.SPEED2,
+        CeilingFanRemote.COMMANDS.FAN.SPEED3
+      ]
+
+      this.sendCommand(this.fanOn ? commands[this.fanSpeed] : CeilingFanRemote.COMMANDS.FAN.OFF);
+
       callback();
     });
 
@@ -95,20 +156,21 @@ class ExampleSwitch implements AccessoryPlugin {
       /*
       *   GET Rotation Speed
       */
-      log.info(`Get fan speed (Current Value: ${this.fanSpeed})`);
-      callback(undefined, this.fanSpeed);
+      log.info(`GET fan speed (Current Value: ${this.fanSpeed})`);
+      callback(undefined, this.fanSpeed*this.fanStep);
     })
     .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
       /*
       *   SET Rotation Speed
       */
-      const newSpeed = value as number;
+      const newSpeed = (value as number)/this.fanStep;
       const oldSpeed = this.fanSpeed;
+
       if(newSpeed === 0) {
         //Speed being set to zero means we're trying to turn it off, probably via the home app.
         setTimeout(()=>{
-          log.info(`Fan speed set to 0 (IE: off). Reverting speed to last good speed (${this.fanSpeed}) so that it has somewhere to go if it gets a straight "on" command`);
-          this.fanService.updateCharacteristic(hap.Characteristic.RotationSpeed, this.fanSpeed);
+          if(this.verbose) log.info(`Fan speed set to 0 (IE: off). Reverting speed to last good speed (${this.fanSpeed}) so that it has somewhere to go if it gets a straight "on" command`);
+          this.fanService.updateCharacteristic(hap.Characteristic.RotationSpeed, this.fanSpeed*this.fanStep);
           this.fanService.updateCharacteristic(hap.Characteristic.Active, false);
         }, 100)
       }
@@ -116,6 +178,15 @@ class ExampleSwitch implements AccessoryPlugin {
         this.fanSpeed = newSpeed;
         log.info(`SET fan speed to ${this.fanSpeed}`);
       }
+
+      const commands = [
+        CeilingFanRemote.COMMANDS.FAN.OFF,
+        CeilingFanRemote.COMMANDS.FAN.SPEED1,
+        CeilingFanRemote.COMMANDS.FAN.SPEED2,
+        CeilingFanRemote.COMMANDS.FAN.SPEED3
+      ]
+
+      this.sendCommand(commands[newSpeed]);
       callback();
     })
     .setProps({
@@ -137,7 +208,7 @@ class ExampleSwitch implements AccessoryPlugin {
       /*
       *   GET On
       */
-      log.info(`GET light on (Current Value: ${this.lightOn}`);
+      log.info(`GET light on (Current Value: ${this.lightOn})`);
       callback(undefined, this.lightOn);
     })
     .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
@@ -146,6 +217,7 @@ class ExampleSwitch implements AccessoryPlugin {
       */
       this.lightOn = value as boolean;
       log.info(`SET light on to ${this.lightOn}`);
+      this.sendCommand(this.lightOn ? CeilingFanRemote.COMMANDS.LIGHT.ON :  CeilingFanRemote.COMMANDS.LIGHT.OFF);
       callback();
     });
 
@@ -158,19 +230,19 @@ class ExampleSwitch implements AccessoryPlugin {
       /*
       *   GET Brightness
       */
-      log.info(`GET light brightness (Current Value: ${this.lightBrightness}`);
-      callback(undefined, this.lightBrightness);
+      log.info(`GET light brightness (Current Value: ${this.lightBrightness})`);
+      callback(undefined, this.lightBrightness*12);
     })
     .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
       /*
       *   SET Brightness
       */
-      const newBrightness = value as number;
+      const newBrightness = (value as number)/12;
       const oldBrightness = this.lightBrightness;
       if(newBrightness === 0) {
         //Speed being set to zero means we're trying to turn it off, probably via the home app.
         setTimeout(()=>{
-          log.info(`Light brightness set to 0 (IE: off). Reverting brightness to last good value (${this.lightBrightness}) so that it has somewhere to go if it gets a straight "on" command`);
+          if(this.verbose) log.info(`Light brightness set to 0 (IE: off). Reverting brightness to last good value (${this.lightBrightness}) so that it has somewhere to go if it gets a straight "on" command`);
           this.lightService.updateCharacteristic(hap.Characteristic.Brightness, this.lightBrightness);
           this.lightService.updateCharacteristic(hap.Characteristic.On, false);
         }, 100)
@@ -179,6 +251,20 @@ class ExampleSwitch implements AccessoryPlugin {
         this.lightBrightness = newBrightness;
         log.info(`SET light brightness to ${this.lightBrightness}`);
       }
+
+      const commands = [
+        CeilingFanRemote.COMMANDS.LIGHT.OFF,
+        CeilingFanRemote.COMMANDS.LIGHT.BRIGHTNESS1,
+        CeilingFanRemote.COMMANDS.LIGHT.BRIGHTNESS2,
+        CeilingFanRemote.COMMANDS.LIGHT.BRIGHTNESS3,
+        CeilingFanRemote.COMMANDS.LIGHT.BRIGHTNESS4,
+        CeilingFanRemote.COMMANDS.LIGHT.BRIGHTNESS5,
+        CeilingFanRemote.COMMANDS.LIGHT.BRIGHTNESS6,
+        CeilingFanRemote.COMMANDS.LIGHT.BRIGHTNESS7,
+        CeilingFanRemote.COMMANDS.LIGHT.BRIGHTNESS8
+      ];
+      this.sendCommand(commands[newBrightness]);
+
       callback();
     })
     .setProps({
@@ -196,10 +282,16 @@ class ExampleSwitch implements AccessoryPlugin {
     */
     this.informationService = new hap.Service.AccessoryInformation()
       .setCharacteristic(hap.Characteristic.Manufacturer, "Andrew Parnell")
-      .setCharacteristic(hap.Characteristic.Model, "Ceiling fan controls");
+      .setCharacteristic(hap.Characteristic.Model, "Ceiling fan controls"); 
+      /*
+      .setCharacteristic(Characteristic.SerialNumber, this.serialNumber || "SW01")
+      .setCharacteristic(Characteristic.FirmwareRevision, packageJSON.version);
+      */
 
     log.info("Switch finished initializing!");
   }
+
+
 
   /*
    * This method is optional to implement. It is called when HomeKit ask to identify the accessory.
@@ -209,6 +301,79 @@ class ExampleSwitch implements AccessoryPlugin {
     this.log("Identify!");
   }
 
+  sendCommand(command: number = -1): void {
+    /*
+      Known commands
+
+      # Fan Functions
+      # Fan Power
+      98 - Fan Off
+      35 - Fan Toggle On/Off
+
+      ## Absolute Speed
+      4 - Fan Speed 1
+      32 - Fan Speed 2
+      64 - Fan Speed 3
+
+      ## Relative speed
+      514 - Fan -
+      513 - Fan +
+      2 - Fan Min
+      66 - Fan Max
+
+      # Light Functions
+      ## Power
+      138 - Light On
+      266 - Light Off
+      768 - Light Toggle On/Off
+
+      ## Absolute Brightness
+      10 - Light 12.5% aka level 1
+      11 - Light 25.0% aka level 2
+      12 - Light 37.5% aka level 3
+      13 - Light 50.0% aka level 4
+      14 - Light 62.5% aka level 5
+      15 - Light 75.0% aka level 6
+      72 - Light 87.5% aka level 7
+      73 - Light 100.0% aka level 8
+
+      ## Relative brightness
+      265 - Light -
+      137 - Light +
+      9 - Light Min
+      74 - Light Max
+
+      # Utility Functions
+      5 - Enable/Disable Light Dimming
+      65 - Pair Remote
+    */
+
+    if(command === -1 || typeof command !== "number") {
+      //Invalid command, do nothing.
+    }
+    else if(!(this.rfbridge==="test"||this.remote==="test")) {
+      const room: string = `A0${this.remote.padStart(40, "0").replace(/0/g, "82").replace(/1/g, "A0")}82`;
+      const rfrawCommand: string = `82${command.toString(2).padStart(10, "0").replace(/0/g, "82").replace(/1/g, "A0")}A0`;
+      const rfrawInverseCommand: string = `A0${command.toString(2).padStart(10, "0").replace(/1/g, "82").replace(/0/g, "A0")}83`;
+      const target: string = `http://${this.rfbridge}/cm?cmnd=rfraw%20AAB0580403018813E803106510808080808080808080808081${room}${rfrawCommand}${rfrawInverseCommand}55`;
+      if(this.verbose) this.log.info(`sendCommand(${command})\n`);
+
+      (async () => {
+          try {
+              const response: Response = await got(target);
+              if(this.verbose) this.log.info(`sendCommand(${command}) Response\nTarget: ${target}\nResponse ${response.body}`);
+              //=> '<!doctype html> ...'
+          } catch (error) {
+              this.log.warn(`sendCommand(${command}) Error\nTarget: ${target}\nError ${error.response.body}`);
+              //=> 'Internal server error ...'
+          }
+      })();
+    }
+    else {
+      //Running in test mode, no command will be sent.
+    }
+  }
+
   /*
    * This method is called directly after creation of this instance.
    * It should return all services which should be added to the accessory.
@@ -216,8 +381,8 @@ class ExampleSwitch implements AccessoryPlugin {
   getServices(): Service[] {
     return [
       this.informationService,
-      this.lightService,
       this.fanService,
+      this.lightService,
     ];
   }
 

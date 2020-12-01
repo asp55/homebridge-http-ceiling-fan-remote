@@ -6,6 +6,7 @@
   "scripts": {
     "clean": "rimraf ./dist",
     "build": "rimraf ./dist && tsc",
+    "start": "npm run watch",
     "watch": "npm run build && npm link && nodemon",
     "prepublishOnly": "npm run build",
     "postpublish": "npm run clean",
@@ -36,5 +37,8 @@
     "nodemon": "^2.0.6",
     "rimraf": "^3.0.2",
     "typescript": "^3.9.7"
+  },
+  "dependencies": {
+    "got": "^11.8.0"
   }
 }
