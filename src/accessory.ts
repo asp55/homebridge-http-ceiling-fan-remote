@@ -97,15 +97,18 @@ class CeilingFanRemote implements AccessoryPlugin {
   private fanOn = false;
   private readonly fanStep = 33.33;
   private fanSpeed = 1;
+
   private readonly lightService: Service;
   private lightOn = false;
   private lightBrightness = 8;
+
   //private readonly targetControlManagementService: Service;
   private readonly informationService: Service;
 
   //command queue
   private pendingCommand: Boolean = false;
   private commandQueue:Array<Command> = [];
+  private lastCommand:number = -1;
 
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
@@ -383,7 +386,7 @@ class CeilingFanRemote implements AccessoryPlugin {
 
   private addCommand(command:number = -1, targetUrl:string): void {
     this.commandQueue.push({command:command, targetUrl:targetUrl});
-    this.log.info(`Queued Command: {command:${command}, targetUrl:${targetUrl}}`);
+    if(this.verbose) this.log.info(`Queued Command: {command:${command}, targetUrl:${targetUrl}}`);
     this.runNextCommand();
   }
 
@@ -394,8 +397,15 @@ class CeilingFanRemote implements AccessoryPlugin {
         const command:number = nextCommand.command;
         const target:string = nextCommand.targetUrl;
 
-        if(!(this.rfbridge==="test"||this.remote==="test")) {
+        if(command===138 && (this.lastCommand>=10 && this.lastCommand<=73)) {
+          //We can skip actually running a command if the command is "on" and the last command was to set a brightness.
+          if(this.verbose) this.log.info(`skipping runCommand(${command})`);
+          this.lastCommand = command;
+          this.runNextCommand();
+        }
+        else if(!(this.rfbridge==="test"||this.remote==="test")) {
           this.pendingCommand = true;
+          this.lastCommand = command;
           got(target)
           .then((response:Response)=>{
             if(this.verbose) this.log.info(`runCommand(${command}) \n\tTarget: ${target}\n\tResponse ${response.body}`);
