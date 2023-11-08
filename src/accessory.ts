@@ -389,7 +389,7 @@ class CeilingFanRemote implements AccessoryPlugin {
 
   private runNextCommand(): void {
     if(!this.pendingCommand) {
-      const nextCommand = this.commandQueue.pop();
+      const nextCommand = this.commandQueue.shift();
       if(nextCommand) {
         const command:number = nextCommand.command;
         const target:string = nextCommand.targetUrl;
