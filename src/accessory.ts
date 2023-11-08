@@ -404,8 +404,10 @@ class CeilingFanRemote implements AccessoryPlugin {
             this.log.warn(`runCommand(${command}) Error\nTarget: ${target}\nError: `, error);
           })
           .finally(()=>{
-            this.pendingCommand = false;
-            this.runNextCommand();
+            setTimeout(()=>{
+              this.pendingCommand = false;
+              this.runNextCommand();
+            }, 100)
           })
         }
         else {
