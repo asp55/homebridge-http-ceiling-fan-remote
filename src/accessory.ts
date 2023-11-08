@@ -44,6 +44,11 @@ export = (api: API) => {
   api.registerAccessory("CEILING-FAN-REMOTE", CeilingFanRemote);
 };
 
+interface Command {
+  command: number;
+  targetUrl: string;
+}
+
 class CeilingFanRemote implements AccessoryPlugin {
 
   static COMMANDS = {
@@ -98,7 +103,9 @@ class CeilingFanRemote implements AccessoryPlugin {
   //private readonly targetControlManagementService: Service;
   private readonly informationService: Service;
 
-
+  //command queue
+  private pendingCommand: Boolean = false;
+  private commandQueue:Array<Command> = [];
 
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
@@ -351,27 +358,64 @@ class CeilingFanRemote implements AccessoryPlugin {
     if(command === -1 || typeof command !== "number") {
       //Invalid command, do nothing.
     }
-    else if(!(this.rfbridge==="test"||this.remote==="test")) {
+    else  {
       const room: string = `A0${this.remote.padStart(40, "0").replace(/0/g, "82").replace(/1/g, "A0")}82`;
       const rfrawCommand: string = `82${command.toString(2).padStart(10, "0").replace(/0/g, "82").replace(/1/g, "A0")}A0`;
       const rfrawInverseCommand: string = `A0${command.toString(2).padStart(10, "0").replace(/1/g, "82").replace(/0/g, "A0")}83`;
       const target: string = `http://${this.rfbridge}/cm?cmnd=rfraw%20AAB0580403018813E803106510808080808080808080808081${room}${rfrawCommand}${rfrawInverseCommand}55`;
       if(this.verbose) this.log.info(`sendCommand(${command})\n`);
 
+      this.addCommand(command, target);
+      /*
       (async () => {
           try {
               const response: Response = await got(target);
               if(this.verbose) this.log.info(`sendCommand(${command}) Response\nTarget: ${target}\nResponse ${response.body}`);
               //=> '<!doctype html> ...'
           } catch (error) {
-              this.log.warn(`sendCommand(${command}) Error\nTarget: ${target}\nError ${error.response.body}`);
+              this.log.warn(`sendCommand(${command}) Error\nTarget: ${target}\nError: `, error);
               //=> 'Internal server error ...'
           }
       })();
+      */
     }
-    else {
-      //Running in test mode, no command will be sent.
+  }
+
+  private addCommand(command:number = -1, targetUrl:string): void {
+    this.commandQueue.push({command:command, targetUrl:targetUrl});
+    this.log.info(`Queued Command: {command:${command}, targetUrl:${targetUrl}}`);
+    this.runNextCommand();
+  }
+
+  private runNextCommand(): void {
+    if(!this.pendingCommand) {
+      const nextCommand = this.commandQueue.pop();
+      if(nextCommand) {
+        const command:number = nextCommand.command;
+        const target:string = nextCommand.targetUrl;
+
+        if(!(this.rfbridge==="test"||this.remote==="test")) {
+          this.pendingCommand = true;
+          got(target)
+          .then((response:Response)=>{
+            if(this.verbose) this.log.info(`runCommand(${command}) \n\tTarget: ${target}\n\tResponse ${response.body}`);
+          })
+          .catch((error)=>{
+            this.log.warn(`runCommand(${command}) Error\nTarget: ${target}\nError: `, error);
+          })
+          .finally(()=>{
+            this.pendingCommand = false;
+            this.runNextCommand();
+          })
+        }
+        else {
+          this.log.info(`TEST MODE: runCommand(${command}) \n\tTarget: ${target}`)
+          //Running in test mode, no command will be sent
+        }
+
+      }
     }
+    
   }
 
   /*

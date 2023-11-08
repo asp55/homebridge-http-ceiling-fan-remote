@@ -1,6 +1,6 @@
 {
   "name": "homebridge-http-ceiling-fan-remote",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A remote using http commands to control a hunter ceiling fan via a tasmotized sonoff rfbridge for homebridge written in Typescript",
   "main": "dist/accessory.js",
   "scripts": {
